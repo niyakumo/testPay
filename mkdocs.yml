@@ -14,6 +14,8 @@ theme:
     - content.code.copy
     - search.suggest
     - search.highlight
+    - content.action.edit # включи при указании repo_url/edit_uri
+    - content.action.view
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
@@ -64,10 +66,10 @@ extra_javascript:
 
 nav:
   - Overview: index.md
-  - API (OpenAPI): api/openapi.yaml
+  - API (OpenAPI): api/openapi.yml # у тебя .yml — оставляем так
   - Flows:
       - Sequences: flows/sequence.md
-      - States: flows/states.md
+      - States: flows/states.md # создай файл-пустышку, если ещё нет
   - Glossary: glossary.md
-  - Testing: testing/acceptance.md
+  - Testing: testing/acceptance.md # создай файл-пустышку, если ещё нет
   - Decisions (ADR): adr/README.md

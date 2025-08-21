@@ -1,0 +1,17 @@
+# Build / cache
+site/
+.cache/
+
+# Python venv / cache
+.venv/
+__pycache__/
+*.py[cod]
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# MkDocs local plugins
+*.log
