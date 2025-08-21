@@ -1,0 +1,227 @@
+openapi: 3.1.0
+info:
+  title: testPay — Auth & 2FA OTP API
+  version: 0.1.0
+  description: Two-factor authentication with OTP; JWT issuance and refresh rotation.
+servers:
+  - url: https://api.testpay.example
+paths:
+  /auth/start:
+    post:
+      summary: Start authentication and send OTP
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthStartRequest"
+      responses:
+        "200":
+          description: Challenge created; OTP dispatched
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthStartResponse"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /auth/otp/verify:
+    post:
+      summary: Verify OTP and issue one-time auth_code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OtpVerifyRequest"
+      responses:
+        "200":
+          description: OTP valid; auth_code issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OtpVerifyResponse"
+        "400":
+          description: Invalid/expired/redeemed OTP
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /oauth/token:
+    post:
+      summary: Exchange code→tokens (PKCE) or refresh tokens
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              oneOf:
+                - $ref: "#/components/schemas/TokenByCodeRequest"
+                - $ref: "#/components/schemas/TokenByRefreshRequest"
+      responses:
+        "200":
+          description: Tokens issued
+          headers:
+            Cache-Control:
+              schema: { type: string }
+              description: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "400":
+          description: invalid_grant / invalid_request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /auth/logout:
+    post:
+      summary: Revoke current session (refresh)
+      security:
+        - bearerJwt: []
+          dpop: []
+      responses:
+        "204":
+          description: Revoked
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /auth/logout/all:
+    post:
+      summary: Revoke all user sessions (global logout)
+      security:
+        - bearerJwt: []
+          dpop: []
+      responses:
+        "204":
+          description: All sessions revoked
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /.well-known/jwks.json:
+    get:
+      summary: JWKS public keys
+      responses:
+        "200":
+          description: JWK Set
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  keys:
+                    type: array
+                    items:
+                      type: object
+
+components:
+  securitySchemes:
+    bearerJwt:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    dpop:
+      type: apiKey
+      in: header
+      name: DPoP
+  responses:
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    TooManyRequests:
+      description: Too many requests
+      headers:
+        Retry-After:
+          schema: { type: integer }
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    BadRequest:
+      description: Bad request
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+  schemas:
+    AuthStartRequest:
+      type: object
+      required: [identifier, channel]
+      properties:
+        identifier:
+          type: string
+          description: phone (E.164) or email
+        channel:
+          type: string
+          enum: [sms, email, totp]
+        device_id:
+          type: string
+          description: Optional device fingerprint/ID
+    AuthStartResponse:
+      type: object
+      required: [challenge_id, expires_in]
+      properties:
+        challenge_id:
+          type: string
+        expires_in:
+          type: integer
+          description: seconds
+        resend_at:
+          type: string
+          format: date-time
+    OtpVerifyRequest:
+      type: object
+      required: [challenge_id, otp]
+      properties:
+        challenge_id: { type: string }
+        otp: { type: string, minLength: 4, maxLength: 8 }
+    OtpVerifyResponse:
+      type: object
+      required: [auth_code, expires_in]
+      properties:
+        auth_code:
+          { type: string, description: One-time code for token exchange }
+        expires_in: { type: integer, description: seconds }
+    TokenByCodeRequest:
+      type: object
+      required: [grant_type, code, code_verifier, client_id, redirect_uri]
+      properties:
+        grant_type:
+          type: string
+          enum: [authorization_code]
+        code: { type: string }
+        code_verifier: { type: string }
+        client_id: { type: string }
+        redirect_uri: { type: string, format: uri }
+    TokenByRefreshRequest:
+      type: object
+      required: [grant_type, refresh_token]
+      properties:
+        grant_type:
+          type: string
+          enum: [refresh_token]
+        refresh_token: { type: string }
+        client_id: { type: string }
+    TokenResponse:
+      type: object
+      required: [access_token, token_type, expires_in]
+      properties:
+        access_token: { type: string }
+        token_type: { type: string, enum: [Bearer] }
+        expires_in: { type: integer }
+        refresh_token: { type: string }
+        scope: { type: string }
+        amr:
+          type: array
+          items: { type: string }
+          description: Authentication Methods References (e.g., ["otp"])
+        sid: { type: string, description: Session ID }
+    Problem:
+      type: object
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        code: { type: string }
+        detail: { type: string }
+        traceId: { type: string }

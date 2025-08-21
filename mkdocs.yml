@@ -1,0 +1,73 @@
+site_name: testPay — Auth & 2FA OTP API
+site_description: Product & System Spec (OneDoc) + OpenAPI for mobile wallet authentication
+site_url: https://niyakumo.github.io/testPay/
+repo_url: https://github.com/niyakumo/testPay
+edit_uri: edit/main/docs/
+
+strict: true
+
+theme:
+  name: material
+  language: ru
+  features:
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Тёмная тема
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Светлая тема
+
+plugins:
+  - search
+  - swagger-ui-tag
+  - ezglossary:
+      ignore_case: true
+      inline_refs: short
+      tooltip: short
+      use_default: true
+  - git-revision-date-localized:
+      fallback_to_build_date: true
+  - redirects:
+      redirect_maps: {}
+  - social
+
+markdown_extensions:
+  - admonition
+  - def_list
+  - abbr
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+extra_javascript:
+  - https://unpkg.com/mermaid@10/dist/mermaid.min.js
+
+nav:
+  - Overview: index.md
+  - API (OpenAPI): api/openapi.yaml
+  - Flows:
+      - Sequences: flows/sequence.md
+      - States: flows/states.md
+  - Glossary: glossary.md
+  - Testing: testing/acceptance.md
+  - Decisions (ADR): adr/README.md
