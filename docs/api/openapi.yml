@@ -2,55 +2,186 @@ openapi: 3.1.0
 info:
   title: testPay — Auth & 2FA OTP API
   version: 0.1.0
-  description: Two-factor authentication with OTP; JWT issuance and refresh rotation.
+  description: |
+    Two-factor authentication with OTP codes and JWT token issuance.
+
+    Features:
+    - OAuth 2.1 Authorization Code flow with PKCE (S256)
+    - OTP delivery via SMS and email
+    - JWT tokens with ES256/Ed25519 signatures
+    - Refresh token rotation with replay detection
+    - Optional DPoP (device binding)
+
+    Security considerations:
+    - Rate limiting on all endpoints
+    - Idempotent operations with Idempotency-Key
+    - Refresh token groups for compromise detection
+
 servers:
   - url: https://api.testpay.example
+    description: Production API
+
 paths:
   /auth/start:
     post:
       summary: Start authentication and send OTP
+      description: |
+        Initiate the authentication process by sending an OTP to the specified identifier.
+
+        Rate limits:
+        - 5 requests per minute per identifier+device
+        - 20 requests per hour per identifier+device  
+        - 60 requests per minute per IP
+
+        Supports idempotency via Idempotency-Key header.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          schema:
+            type: string
+          description: Optional idempotency key for duplicate request handling
       requestBody:
         required: true
         content:
           application/json:
             schema:
               $ref: "#/components/schemas/AuthStartRequest"
+            examples:
+              sms_request:
+                summary: SMS OTP request
+                value:
+                  identifier: "+1234567890"
+                  channel: "sms"
+                  device_info:
+                    device_id: "device_abc123"
+                    platform: "ios"
+                    app_version: "1.2.0"
+              email_request:
+                summary: Email OTP request
+                value:
+                  identifier: "user@example.com"
+                  channel: "email"
+                  device_info:
+                    device_id: "device_xyz789"
+                    platform: "android"
+                    app_version: "1.2.0"
       responses:
-        "200":
-          description: Challenge created; OTP dispatched
+        "202":
+          description: Challenge created; OTP dispatched (or existing challenge returned)
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthStartResponse"
+              examples:
+                new_challenge:
+                  summary: New challenge created
+                  value:
+                    challenge_id: "chall_abc123def456"
+                    expires_in: 180
+                    retry_after: 30
+                existing_challenge:
+                  summary: Existing active challenge
+                  value:
+                    challenge_id: "chall_existing789"
+                    expires_in: 120
+                    retry_after: 25
+        "400":
+          description: Bad request or channel locked
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+              examples:
+                channel_locked:
+                  summary: Channel change not allowed
+                  value:
+                    type: "https://api.testpay.example/problems/channel-locked"
+                    title: "Channel Locked"
+                    status: 400
+                    code: "channel_locked"
+                    detail: "Cannot change delivery channel while challenge is active"
+                    traceId: "trace_123"
         "429":
           $ref: "#/components/responses/TooManyRequests"
-        "400":
-          $ref: "#/components/responses/BadRequest"
+
   /auth/otp/verify:
     post:
-      summary: Verify OTP and issue one-time auth_code
+      summary: Verify OTP and issue authorization code
+      description: |
+        Verify the OTP code and receive a one-time authorization code for token exchange.
+
+        Limits: 5 attempts per challenge before 15-minute lockout.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               $ref: "#/components/schemas/OtpVerifyRequest"
+            example:
+              challenge_id: "chall_abc123def456"
+              otp: "123456"
       responses:
         "200":
-          description: OTP valid; auth_code issued
+          description: OTP valid; authorization code issued
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/OtpVerifyResponse"
+              example:
+                authorization_code: "auth_xyz789abc123"
+                code_challenge_method: "S256"
+                expires_in: 60
         "400":
-          description: Invalid/expired/redeemed OTP
+          description: Invalid, expired, or already used OTP
           content:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
+              examples:
+                otp_invalid:
+                  summary: Invalid OTP
+                  value:
+                    type: "https://api.testpay.example/problems/otp-invalid"
+                    title: "Invalid OTP"
+                    status: 400
+                    code: "otp_invalid"
+                    detail: "The provided OTP code is incorrect"
+                    traceId: "trace_456"
+                otp_expired:
+                  summary: Expired OTP
+                  value:
+                    type: "https://api.testpay.example/problems/otp-expired"
+                    title: "OTP Expired"
+                    status: 400
+                    code: "otp_expired"
+                    detail: "The OTP code has expired. Please request a new one"
+                    traceId: "trace_789"
+                code_redeemed:
+                  summary: Code already used
+                  value:
+                    type: "https://api.testpay.example/problems/code-redeemed"
+                    title: "Code Already Used"
+                    status: 400
+                    code: "code_redeemed"
+                    detail: "This authorization code has already been exchanged for tokens"
+                    traceId: "trace_012"
+
   /oauth/token:
     post:
-      summary: Exchange code→tokens (PKCE) or refresh tokens
+      summary: Exchange authorization code for tokens or refresh tokens
+      description: |
+        OAuth 2.1 token endpoint supporting:
+        - Authorization code exchange with PKCE (S256 method required)
+        - Refresh token rotation with compromise detection
+
+        All refresh tokens are single-use. Reusing an old refresh token 
+        will revoke the entire token family.
+      parameters:
+        - name: DPoP
+          in: header
+          schema:
+            type: string
+          description: Optional DPoP proof JWT for token binding
       requestBody:
         required: true
         content:
@@ -59,60 +190,127 @@ paths:
               oneOf:
                 - $ref: "#/components/schemas/TokenByCodeRequest"
                 - $ref: "#/components/schemas/TokenByRefreshRequest"
+            examples:
+              code_exchange:
+                summary: Authorization code exchange
+                value:
+                  grant_type: "authorization_code"
+                  code: "auth_xyz789abc123"
+                  code_verifier: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+                  client_id: "mobile_app_v1"
+                  redirect_uri: "https://app.testpay.example/callback"
+              refresh_token:
+                summary: Refresh token exchange
+                value:
+                  grant_type: "refresh_token"
+                  refresh_token: "refresh_abc123def456"
+                  client_id: "mobile_app_v1"
       responses:
         "200":
-          description: Tokens issued
+          description: Tokens issued successfully
           headers:
             Cache-Control:
-              schema: { type: string }
-              description: no-store
+              schema:
+                type: string
+                example: "no-store"
+              description: Prevents token caching
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/TokenResponse"
+              example:
+                access_token: "eyJhbGciOiJFUzI1NiIsImtpZCI6IjIwMjUtMDEifQ..."
+                token_type: "Bearer"
+                expires_in: 600
+                refresh_token: "refresh_new789xyz456"
+                scope: "user:read user:write"
+                amr: ["otp"]
+                sid: "session_abc123"
         "400":
-          description: invalid_grant / invalid_request
+          description: Invalid grant, PKCE failure, or token reuse detected
           content:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
+              examples:
+                invalid_grant:
+                  summary: Invalid authorization code or PKCE
+                  value:
+                    type: "https://api.testpay.example/problems/invalid-grant"
+                    title: "Invalid Grant"
+                    status: 400
+                    code: "invalid_grant"
+                    detail: "The authorization code or PKCE verifier is invalid"
+                    traceId: "trace_345"
+                token_reused:
+                  summary: Refresh token reuse detected
+                  value:
+                    type: "https://api.testpay.example/problems/token-reused"
+                    title: "Token Reuse Detected"
+                    status: 400
+                    code: "token_reused"
+                    detail: "Refresh token reuse detected. All tokens in this family have been revoked"
+                    traceId: "trace_678"
+
   /auth/logout:
     post:
-      summary: Revoke current session (refresh)
+      summary: Revoke current refresh token (local logout)
+      description: |
+        Revoke the current refresh token and invalidate the session.
+        The access token remains valid until expiration.
       security:
         - bearerJwt: []
-          dpop: []
+        - dpopAuth: []
       responses:
         "204":
-          description: Revoked
+          description: Current session revoked successfully
         "401":
           $ref: "#/components/responses/Unauthorized"
+
   /auth/logout/all:
     post:
-      summary: Revoke all user sessions (global logout)
+      summary: Revoke all user refresh tokens (global logout)
+      description: |
+        Revoke all refresh tokens for the authenticated user across all devices.
+        All access tokens remain valid until expiration.
       security:
         - bearerJwt: []
-          dpop: []
+        - dpopAuth: []
       responses:
         "204":
-          description: All sessions revoked
+          description: All user sessions revoked successfully
         "401":
           $ref: "#/components/responses/Unauthorized"
+
   /.well-known/jwks.json:
     get:
-      summary: JWKS public keys
+      summary: JSON Web Key Set (JWKS) for JWT verification
+      description: |
+        Public keys for verifying JWT signatures. Keys are rotated regularly.
+
+        Caching: This endpoint supports HTTP caching. Check Cache-Control headers.
       responses:
         "200":
-          description: JWK Set
+          description: JWK Set with public verification keys
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: "public, max-age=3600"
+              description: Caching policy for JWKS
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  keys:
-                    type: array
-                    items:
-                      type: object
+                $ref: "#/components/schemas/JwkSet"
+              example:
+                keys:
+                  - kty: "EC"
+                    crv: "P-256"
+                    use: "sig"
+                    kid: "2025-01"
+                    x: "MKBCTNIcKUSDii11ySs3526iDZ8AiTo7Tu6KPAqv7D4"
+                    y: "4Etl6SRW2YiLUrN5vfvVHuhp7x8PxltmWWlbbM4IFyM"
+                    alg: "ES256"
 
 components:
   securitySchemes:
@@ -120,29 +318,67 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-    dpop:
+      description: JWT access token in Authorization header
+    dpopAuth:
       type: apiKey
       in: header
       name: DPoP
+      description: Optional DPoP proof for token binding to device key
+
   responses:
     Unauthorized:
-      description: Unauthorized
+      description: Authentication required or invalid token
       content:
         application/problem+json:
-          schema: { $ref: "#/components/schemas/Problem" }
+          schema:
+            $ref: "#/components/schemas/Problem"
+          examples:
+            unauthorized:
+              summary: No authentication provided
+              value:
+                type: "https://api.testpay.example/problems/unauthorized"
+                title: "Unauthorized"
+                status: 401
+                code: "unauthorized"
+                detail: "Authentication is required to access this resource"
+                traceId: "trace_901"
+            invalid_token:
+              summary: Invalid or expired token
+              value:
+                type: "https://api.testpay.example/problems/invalid-token"
+                title: "Invalid Token"
+                status: 401
+                code: "invalid_token"
+                detail: "The provided access token is invalid or has expired"
+                traceId: "trace_234"
+
     TooManyRequests:
-      description: Too many requests
+      description: Rate limit exceeded
       headers:
         Retry-After:
-          schema: { type: integer }
+          schema:
+            type: integer
+            example: 60
+          description: Seconds to wait before retrying
       content:
         application/problem+json:
-          schema: { $ref: "#/components/schemas/Problem" }
+          schema:
+            $ref: "#/components/schemas/Problem"
+          example:
+            type: "https://api.testpay.example/problems/rate-limited"
+            title: "Too Many Requests"
+            status: 429
+            code: "rate_limited"
+            detail: "Rate limit exceeded. Please wait before making another request"
+            traceId: "trace_567"
+
     BadRequest:
-      description: Bad request
+      description: Malformed request or validation error
       content:
         application/problem+json:
-          schema: { $ref: "#/components/schemas/Problem" }
+          schema:
+            $ref: "#/components/schemas/Problem"
+
   schemas:
     AuthStartRequest:
       type: object
@@ -150,38 +386,84 @@ components:
       properties:
         identifier:
           type: string
-          description: phone (E.164) or email
+          description: Phone number (E.164 format) or email address
+          examples: ["+1234567890", "user@example.com"]
         channel:
           type: string
-          enum: [sms, email, totp]
-        device_id:
-          type: string
-          description: Optional device fingerprint/ID
+          enum: [sms, email]
+          description: Delivery channel for OTP
+        device_info:
+          type: object
+          description: Optional device information for security and analytics
+          properties:
+            device_id:
+              type: string
+              description: Unique device identifier or fingerprint
+              example: "device_abc123"
+            platform:
+              type: string
+              enum: [ios, android, web]
+              example: "ios"
+            app_version:
+              type: string
+              pattern: '^\d+\.\d+\.\d+$'
+              example: "1.2.0"
+            os_version:
+              type: string
+              example: "iOS 17.1"
+
     AuthStartResponse:
       type: object
-      required: [challenge_id, expires_in]
+      required: [challenge_id, expires_in, retry_after]
       properties:
         challenge_id:
           type: string
+          description: Unique identifier for this authentication challenge
+          example: "chall_abc123def456"
         expires_in:
           type: integer
-          description: seconds
-        resend_at:
-          type: string
-          format: date-time
+          minimum: 120
+          maximum: 300
+          description: Challenge TTL in seconds
+          example: 180
+        retry_after:
+          type: integer
+          minimum: 30
+          description: Minimum seconds before next OTP can be requested
+          example: 30
+
     OtpVerifyRequest:
       type: object
       required: [challenge_id, otp]
       properties:
-        challenge_id: { type: string }
-        otp: { type: string, minLength: 4, maxLength: 8 }
+        challenge_id:
+          type: string
+          description: Challenge identifier from /auth/start
+          example: "chall_abc123def456"
+        otp:
+          type: string
+          pattern: '^\d{6}$'
+          description: 6-digit numeric OTP code
+          example: "123456"
+
     OtpVerifyResponse:
       type: object
-      required: [auth_code, expires_in]
+      required: [authorization_code, code_challenge_method, expires_in]
       properties:
-        auth_code:
-          { type: string, description: One-time code for token exchange }
-        expires_in: { type: integer, description: seconds }
+        authorization_code:
+          type: string
+          description: One-time authorization code for token exchange
+          example: "auth_xyz789abc123"
+        code_challenge_method:
+          type: string
+          enum: [S256]
+          description: PKCE method (always S256)
+          example: "S256"
+        expires_in:
+          type: integer
+          description: Authorization code TTL in seconds
+          example: 60
+
     TokenByCodeRequest:
       type: object
       required: [grant_type, code, code_verifier, client_id, redirect_uri]
@@ -189,10 +471,24 @@ components:
         grant_type:
           type: string
           enum: [authorization_code]
-        code: { type: string }
-        code_verifier: { type: string }
-        client_id: { type: string }
-        redirect_uri: { type: string, format: uri }
+        code:
+          type: string
+          description: Authorization code from OTP verification
+        code_verifier:
+          type: string
+          description: PKCE code verifier (base64url, 43-128 chars)
+          minLength: 43
+          maxLength: 128
+        client_id:
+          type: string
+          description: OAuth client identifier
+          example: "mobile_app_v1"
+        redirect_uri:
+          type: string
+          format: uri
+          description: Must match registered redirect URI
+          example: "https://app.testpay.example/callback"
+
     TokenByRefreshRequest:
       type: object
       required: [grant_type, refresh_token]
@@ -200,28 +496,130 @@ components:
         grant_type:
           type: string
           enum: [refresh_token]
-        refresh_token: { type: string }
-        client_id: { type: string }
+        refresh_token:
+          type: string
+          description: Current refresh token (single use)
+        client_id:
+          type: string
+          description: OAuth client identifier
+          example: "mobile_app_v1"
+
     TokenResponse:
       type: object
       required: [access_token, token_type, expires_in]
       properties:
-        access_token: { type: string }
-        token_type: { type: string, enum: [Bearer] }
-        expires_in: { type: integer }
-        refresh_token: { type: string }
-        scope: { type: string }
+        access_token:
+          type: string
+          description: JWT access token
+          example: "eyJhbGciOiJFUzI1NiIsImtpZCI6IjIwMjUtMDEifQ..."
+        token_type:
+          type: string
+          enum: [Bearer]
+          description: Always "Bearer"
+        expires_in:
+          type: integer
+          description: Access token TTL in seconds
+          example: 600
+        refresh_token:
+          type: string
+          description: New refresh token (single use, rotated)
+          example: "refresh_new789xyz456"
+        scope:
+          type: string
+          description: Granted OAuth scopes
+          example: "user:read user:write"
         amr:
           type: array
-          items: { type: string }
-          description: Authentication Methods References (e.g., ["otp"])
-        sid: { type: string, description: Session ID }
+          items:
+            type: string
+          description: Authentication Methods References
+          example: ["otp"]
+        sid:
+          type: string
+          description: Session identifier
+          example: "session_abc123"
+
+    JwkSet:
+      type: object
+      required: [keys]
+      properties:
+        keys:
+          type: array
+          items:
+            $ref: "#/components/schemas/JsonWebKey"
+          minItems: 1
+          description: Array of JWK objects
+
+    JsonWebKey:
+      type: object
+      required: [kty, use, kid, alg]
+      properties:
+        kty:
+          type: string
+          enum: [EC, OKP]
+          description: Key type (EC for P-256, OKP for Ed25519)
+        crv:
+          type: string
+          enum: [P-256, Ed25519]
+          description: Curve parameter
+        use:
+          type: string
+          enum: [sig]
+          description: Key usage (signature verification)
+        kid:
+          type: string
+          description: Unique key identifier
+          example: "2025-01"
+        x:
+          type: string
+          description: EC/OKP x coordinate (base64url)
+        y:
+          type: string
+          description: EC y coordinate (base64url, not present for OKP)
+        alg:
+          type: string
+          enum: [ES256, EdDSA]
+          description: Algorithm intended for use with this key
+
     Problem:
       type: object
+      required: [type, title, status]
       properties:
-        type: { type: string, format: uri }
-        title: { type: string }
-        status: { type: integer }
-        code: { type: string }
-        detail: { type: string }
-        traceId: { type: string }
+        type:
+          type: string
+          format: uri
+          description: Problem type identifier
+          example: "https://api.testpay.example/problems/otp-invalid"
+        title:
+          type: string
+          description: Human-readable problem summary
+          example: "Invalid OTP"
+        status:
+          type: integer
+          minimum: 100
+          maximum: 599
+          description: HTTP status code
+          example: 400
+        code:
+          type: string
+          description: Machine-readable error code
+          enum:
+            - otp_invalid
+            - otp_expired
+            - code_redeemed
+            - channel_locked
+            - invalid_grant
+            - token_reused
+            - unauthorized
+            - invalid_token
+            - invalid_dpop
+            - rate_limited
+          example: "otp_invalid"
+        detail:
+          type: string
+          description: Human-readable explanation
+          example: "The provided OTP code is incorrect"
+        traceId:
+          type: string
+          description: Request trace identifier for debugging
+          example: "trace_123456"

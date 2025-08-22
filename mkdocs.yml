@@ -1,31 +1,19 @@
-site_name: testPay — Auth & 2FA OTP API
-site_description: Product & System Spec (OneDoc) + OpenAPI for mobile wallet authentication
-site_url: https://niyakumo.github.io/testPay/
-repo_url: https://github.com/niyakumo/testPay
-edit_uri: edit/main/docs/
-
-strict: true
+site_name: Auth & 2FA API
 
 theme:
   name: material
-  language: ru
   features:
-    - navigation.top
+    - content.tooltips
     - content.code.copy
-    - content.action.edit
-    - content.action.view
-    - search.suggest
-    - search.highlight
+    - navigation.tabs
   palette:
-    - media: "(prefers-color-scheme: light)"
-      scheme: default
+    - scheme: default
       primary: indigo
       accent: indigo
       toggle:
         icon: material/weather-night
         name: Тёмная тема
-    - media: "(prefers-color-scheme: dark)"
-      scheme: slate
+    - scheme: slate
       primary: indigo
       accent: indigo
       toggle:
@@ -35,41 +23,39 @@ theme:
 plugins:
   - search
   - swagger-ui-tag
-  - ezglossary:
-      ignore_case: true
-      inline_refs: short # <glossary:Term>
-      tooltip: short
-      use_default: true
+  - macros
   - git-revision-date-localized:
       fallback_to_build_date: true
-  - redirects:
-      redirect_maps: {}
-  - social # красивые OG-карточки (требует imaging-зависимостей)
 
 markdown_extensions:
-  - admonition
-  - def_list
   - abbr
+  - def_list
+  - admonition
   - attr_list
   - tables
   - toc:
       permalink: true
-  - pymdownx.snippets
+  - pymdownx.snippets:
+      auto_append:
+        - includes/abbreviations.md
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - pymdownx.superfences:
       custom_fences:
         - name: mermaid
           class: mermaid
           format: !!python/name:pymdownx.superfences.fence_code_format
 
-extra_javascript:
-  - https://unpkg.com/mermaid@10/dist/mermaid.min.js
-
 nav:
-  - Overview: index.md
-  - API (OpenAPI): api/openapi.yml # у тебя .yml — оставляем так
-  - Flows:
-      - Sequences: flows/sequence.md
-      - States: flows/states.md
-  - Glossary: glossary.md
-  - Testing: testing/acceptance.md
-  - Decisions (ADR): adr/README.md
+  - Обзор: index.md
+  - API: api/index.md
+
+extra:
+  spec_version: "0.1"
+  spec_status: "Draft"
+  spec_owner: "System Analyst"
+  spec_date: "2025-08-22"
+
+watch:
+  - includes

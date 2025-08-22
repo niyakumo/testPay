@@ -1,6 +1,7 @@
-mkdocs
-mkdocs-material[imaging]            # social Pillow/CairoSVG
+mkdocs-material
+mkdocs-macros-plugin
 mkdocs-swagger-ui-tag
-mkdocs-ezglossary-plugin
-mkdocs-redirects
+mkdocs-redoc-tag           # если используешь <redoc>
 mkdocs-git-revision-date-localized-plugin
+mkdocs-glossary            # если хочешь отдельный плагин глоссария
+pymdown-extensions
