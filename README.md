@@ -1,9 +1,13 @@
-# testPay — Docs
-
-Local preview:
+## Local dev
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -U mkdocs-material mkdocs-swagger-ui-tag mkdocs-ezglossary mkdocs-git-revision-date-localized-plugin mkdocs-redirects
+python -m venv .venv && source .venv/bin/activate
+python -m pip install -r requirements.txt
 mkdocs serve
+```
+
+## Deploy
+
+```bash
+git push origin main  # workflow публикует в gh-pages
 ```

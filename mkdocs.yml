@@ -12,10 +12,10 @@ theme:
   features:
     - navigation.top
     - content.code.copy
+    - content.action.edit
+    - content.action.view
     - search.suggest
     - search.highlight
-    - content.action.edit # включи при указании repo_url/edit_uri
-    - content.action.view
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
@@ -37,14 +37,14 @@ plugins:
   - swagger-ui-tag
   - ezglossary:
       ignore_case: true
-      inline_refs: short
+      inline_refs: short # <glossary:Term>
       tooltip: short
       use_default: true
   - git-revision-date-localized:
       fallback_to_build_date: true
   - redirects:
       redirect_maps: {}
-  - social
+  - social # красивые OG-карточки (требует imaging-зависимостей)
 
 markdown_extensions:
   - admonition
@@ -69,7 +69,7 @@ nav:
   - API (OpenAPI): api/openapi.yml # у тебя .yml — оставляем так
   - Flows:
       - Sequences: flows/sequence.md
-      - States: flows/states.md # создай файл-пустышку, если ещё нет
+      - States: flows/states.md
   - Glossary: glossary.md
-  - Testing: testing/acceptance.md # создай файл-пустышку, если ещё нет
+  - Testing: testing/acceptance.md
   - Decisions (ADR): adr/README.md

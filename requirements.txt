@@ -1,0 +1,6 @@
+mkdocs
+mkdocs-material[imaging]            # social Pillow/CairoSVG
+mkdocs-swagger-ui-tag
+mkdocs-ezglossary-plugin
+mkdocs-redirects
+mkdocs-git-revision-date-localized-plugin
