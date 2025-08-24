@@ -8,12 +8,11 @@ spec:
 
 # Auth & 2FA OTP API — Product & System Spec
 
-## Summary
+## Executive Summary
 
 **Цель:** Обеспечить безопасную двухфакторную аутентификацию пользователей мобильного приложения с использованием OTP-кодов и выдачей JWT-токенов.
 
 **Что включает:**
-
 - Запуск процесса аутентификации и отправка OTP.
 - Верификация OTP-кода и выдача авторизационного кода.
 - Обмен авторизационного кода на access/refresh токены.
@@ -24,7 +23,6 @@ spec:
 **Что НЕ включает:** социальные логины, web-SSO, процедуры KYC.
 
 **Архитектурные решения:**
-
 - OAuth 2.1 с Authorization Code flow + PKCE (S256).
 - JWT-токены с подписью ES256/Ed25519, обязательный `kid`, запрет `alg="none"`.
 - Refresh Token Rotation с детекцией повторного использования.
@@ -37,25 +35,21 @@ spec:
 ## 1. Контекст и цели
 
 ### Целевая аудитория
-
 Пользователи мобильного кошелька на iOS и Android.
 
 ### Ключевые метрики (KPI)
-
 1. Конверсия авторизации (успешные / все попытки).
 2. Время получения токена (start → access_token).
 3. Качество OTP (доля `otp_invalid` / `otp_expired`).
 4. Частота повторных запросов OTP.
 
 ### Политики OTP
-
 - Одноразовые коды: 6-значные числовые.
 - Время жизни: 3 минуты (180 секунд).
 - Защита от злоупотреблений: лимиты на попытки и повторные отправки.
 - Временные блокировки при превышении лимитов.
 
 ### Внешние зависимости
-
 - OTP-провайдеры: SMS-шлюз и **почтовый шлюз (email)** для доставки кодов.
 - Локализация: многоязычные сообщения об ошибках.
 - Аудит: система логирования и мониторинга безопасности.
@@ -116,7 +110,9 @@ resend_limits:                   # повторная отправка OTP
 
 ### Каналы доставки OTP
 
-- **Поддерживаемые:** SMS, email.
+- **Поддерживаемые:** SMS, email, TOTP (authenticator apps).
+- **SMS/Email:** Доставка через внешние провайдеры, есть затраты на отправку.
+- **TOTP:** Google Authenticator, Authy и др. — без затрат, но требует предварительной настройки.
 - **Ограничение:** смена канала при активном challenge — запрещена (`channel_locked`).
 
 ---
@@ -225,10 +221,80 @@ stateDiagram-v2
 
 ## 7. Модель данных
 
-### ER-диаграмма (логическая)
+### ER-диаграмма (детальная модель данных)
 
 ```mermaid
 erDiagram
+    USER {
+        uuid id PK
+        string identifier "phone/email"
+        string totp_secret "encrypted, nullable"
+        timestamp created_at
+        timestamp updated_at
+        string status "active|blocked|pending"
+    }
+    
+    CHALLENGE {
+        uuid id PK
+        uuid user_id FK
+        string channel "sms|email|totp"
+        string otp_hash "bcrypt+pepper"
+        string status "created|delivered|verified|expired|redeemed"
+        timestamp expires_at
+        int attempt_count "default 0"
+        timestamp created_at
+        timestamp updated_at
+    }
+    
+    SESSION {
+        uuid id PK
+        uuid user_id FK
+        uuid refresh_group_id FK
+        string device_info "JSON, nullable"
+        string session_key "per-session encryption key"
+        timestamp created_at
+        timestamp last_used_at
+        string status "active|revoked|expired"
+    }
+    
+    REFRESH_GROUP {
+        uuid id PK
+        uuid user_id FK
+        timestamp created_at
+        string status "active|compromised"
+        timestamp compromised_at "nullable"
+    }
+    
+    REFRESH_TOKEN {
+        uuid id PK
+        uuid session_id FK
+        uuid refresh_group_id FK
+        string token_hash "bcrypt+pepper"
+        timestamp expires_at
+        timestamp used_at "nullable"
+        string status "active|used|revoked"
+        string successor_id "nullable, points to next token"
+    }
+    
+    AUTHORIZATION_CODE {
+        uuid id PK
+        uuid challenge_id FK
+        string code_hash "bcrypt+pepper"
+        string code_challenge "PKCE challenge"
+        timestamp expires_at
+        timestamp redeemed_at "nullable"
+        string status "active|redeemed|expired"
+    }
+    
+    OTP_ATTEMPT {
+        uuid id PK
+        uuid challenge_id FK
+        string ip_address
+        string user_agent
+        timestamp attempted_at
+        boolean success
+    }
+
     USER ||--o{ CHALLENGE : creates
     USER ||--o{ SESSION : has
     USER ||--o{ REFRESH_GROUP : owns
@@ -240,9 +306,11 @@ erDiagram
 
 ### Правила хранения
 
-- Секреты (OTP, коды, токены) — только в виде хэшей; уникальная соль + «pepper».
-- Индексы: `expires_at`, `user_id+status`, `group_id+status`.
-- Автоматическая очистка просроченных записей (TTL).
+- **Секреты** (OTP, коды, токены) — только в виде хэшей; уникальная соль + «pepper».
+- **Сессионные ключи** — уникальные для каждой сессии, ротация при refresh.
+- **Индексы:** `expires_at`, `user_id+status`, `group_id+status`, `token_hash`.
+- **Автоматическая очистка** просроченных записей (TTL).
+- **Архитектурный выбор:** Храним refresh tokens для мгновенного revoke и ротации, access tokens остаются stateless JWT.
 
 ---
 
@@ -282,6 +350,8 @@ erDiagram
 - PKCE обязателен.
 - Token rotation; одноразовость кодов/токенов.
 - Clock skew: допуск ±60 секунд.
+- **Сессионные ключи** для Perfect Forward Secrecy.
+- **Hybrid подход:** stateless access tokens + stored refresh tokens для контроля.
 
 ---
 
